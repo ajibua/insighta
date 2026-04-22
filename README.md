@@ -13,6 +13,17 @@ A FastAPI backend for demographic profile querying with advanced filtering, sort
 - **Alembic** — database migrations
 - **uuid_utils** — UUID v7 generation
 
+## Railway Postgres Setup
+
+Use either one of these environment setups in your Railway API service:
+
+1. Set `DATABASE_URL` directly using the Postgres plugin connection value.
+2. Or set `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, and `PGDATABASE`.
+
+The app normalizes `postgres://` and `postgresql://` URLs to the async SQLAlchemy format automatically.
+
+If Railway is detected and the database host is set to localhost, startup fails fast with a clear error so misconfiguration is visible during deploy.
+
 ## Natural Language Parsing Approach
 
 The parser (`app/services/nl_parser.py`) is **entirely rule-based** — no AI, no LLMs. It runs a series of regex and keyword checks against the lowercased query string and builds a filter dict that is passed directly to the same query builder used by `GET /api/profiles`.
