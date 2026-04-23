@@ -88,7 +88,10 @@ If parsing produces **zero** filters (no gender, no age group, no age bounds, no
 ```json
 { "status": "error", "message": "Unable to interpret query" }
 ```
+### Endpoints
 
+GET `/api/profiles`
+GET `/api/profiles/search?q=young%20males%20from%20nigeria`
 ---
 
 ## Parser Limitations
