@@ -2,20 +2,19 @@
 """
 Seed the database with profiles from a JSON file.
 Run: python seed.py profiles.json
-
-Re-running is safe — duplicate names are skipped via ON CONFLICT DO NOTHING.
-UUID v7 is generated per-record using the uuid_utils library.
 """
 
 import asyncio
 import json
+import os
+import ssl
 import sys
-from datetime import timezone
 
 import asyncpg
 import uuid_utils as uuid
+from dotenv import load_dotenv
 
-from app.core.config import settings
+load_dotenv()
 
 
 def classify_age_group(age: int) -> str:
@@ -29,36 +28,66 @@ def classify_age_group(age: int) -> str:
         return "senior"
 
 
-def clean_db_url(url: str) -> str:
-    """Convert SQLAlchemy async URL to plain asyncpg URL."""
-    return url.replace("postgresql+asyncpg://", "postgresql://")
+def get_connection_kwargs() -> dict:
+    pghost = os.getenv("PGHOST", "localhost")
+    pgpassword = os.getenv("PGPASSWORD")
+    pgport = int(os.getenv("PGPORT", "5432"))
+    pguser = os.getenv("PGUSER", "postgres")
+    pgdatabase = os.getenv("PGDATABASE", "railway")
+    sslmode = os.getenv("PGSSLMODE", "")
 
+    # Auto-enable SSL for remote hosts unless explicitly disabled
+    is_remote = pghost not in ("localhost", "127.0.0.1", "::1")
+    use_ssl = sslmode != "disable" and is_remote
 
-def load_profiles(filepath: str) -> list[dict]:
-    """Load profiles from either a top-level list or a {'profiles': [...]} object."""
-    with open(filepath, "r", encoding="utf-8") as f:
-        payload = json.load(f)
+    ssl_ctx = None
+    if use_ssl:
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
 
-    if isinstance(payload, list):
-        profiles = payload
-    elif isinstance(payload, dict) and isinstance(payload.get("profiles"), list):
-        profiles = payload["profiles"]
-    else:
-        raise ValueError(
-            "Invalid JSON format. Expected a list or an object with a 'profiles' list."
-        )
+    kwargs = dict(
+        host=pghost,
+        port=pgport,
+        user=pguser,
+        database=pgdatabase,
+    )
+    if pgpassword:
+        kwargs["password"] = pgpassword
+    if ssl_ctx:
+        kwargs["ssl"] = ssl_ctx
 
-    for i, item in enumerate(profiles):
-        if not isinstance(item, dict):
-            raise ValueError(f"Invalid profile at index {i}: expected an object.")
-
-    return profiles
+    return kwargs
 
 
 async def seed(filepath: str):
-    profiles = load_profiles(filepath)
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        profiles = data["profiles"] if isinstance(data, dict) else data
 
-    conn = await asyncpg.connect(clean_db_url(settings.DATABASE_URL))
+    print("Connecting to database...")
+    conn_kwargs = get_connection_kwargs()
+
+    print(f"  host: {conn_kwargs['host']}")
+    print(f"  port: {conn_kwargs['port']}")
+    print(f"  user: {conn_kwargs['user']}")
+    print(f"  db:   {conn_kwargs['database']}")
+    print(f"  ssl:  {'yes' if conn_kwargs.get('ssl') else 'no'}")
+
+    try:
+        conn = await asyncpg.connect(**conn_kwargs)
+    except Exception as e:
+        print(f"\nERROR: Could not connect.\n{e}")
+        print("\nMake sure you set all vars IN THE SAME cmd window before running:")
+        print("  set PGHOST=your-railway-host.proxy.rlwy.net")
+        print("  set PGPORT=54321")
+        print("  set PGUSER=postgres")
+        print("  set PGPASSWORD=yourpassword")
+        print("  set PGDATABASE=railway")
+        print("  python seed.py seed_profiles.json")
+        sys.exit(1)
+
+    print(f"Connected! Seeding {len(profiles)} profiles...")
 
     inserted = 0
     skipped = 0
@@ -97,12 +126,12 @@ async def seed(filepath: str):
     finally:
         await conn.close()
 
-    print(f"Seed complete: {inserted} inserted, {skipped} skipped (duplicates).")
+    print(f"\nSeed complete: {inserted} inserted, {skipped} skipped (duplicates).")
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python seed.py seed_profiles.json")
+        print("Usage: python seed.py <path-to-profiles.json>")
         sys.exit(1)
 
     asyncio.run(seed(sys.argv[1]))
