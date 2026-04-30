@@ -9,6 +9,7 @@ import httpx
 import uuid_utils as uuid
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, require_admin, require_analyst
@@ -233,6 +234,13 @@ async def create_profile(
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
 
+    # Defaults in case external APIs fail
+    gender = "unknown"
+    gender_prob = 0.0
+    age = 0
+    country_id = "XX"
+    country_prob = 0.0
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             g_resp, a_resp, n_resp = await asyncio.gather(
@@ -243,16 +251,16 @@ async def create_profile(
             gender_data = g_resp.json()
             age_data = a_resp.json()
             nation_data = n_resp.json()
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"External API error: {e}")
 
-    gender = gender_data.get("gender") or "unknown"
-    gender_prob = gender_data.get("probability") or 0.0
-    age = age_data.get("age") or 0
-    countries = nation_data.get("country", [])
-    top_country = countries[0] if countries else {}
-    country_id = top_country.get("country_id", "XX")
-    country_prob = top_country.get("probability", 0.0)
+            gender = gender_data.get("gender") or "unknown"
+            gender_prob = gender_data.get("probability") or 0.0
+            age = age_data.get("age") or 0
+            countries = nation_data.get("country", [])
+            top_country = countries[0] if countries else {}
+            country_id = top_country.get("country_id", "XX")
+            country_prob = top_country.get("probability", 0.0)
+    except Exception:
+        pass  # Use defaults
 
     from app.services.profile_service import classify_age_group
     from app.services.profile_service import COUNTRY_NAMES
@@ -278,3 +286,28 @@ async def create_profile(
         raise HTTPException(status_code=409, detail="Profile with this name already exists")
 
     return {"status": "success", "data": ProfileOut.model_validate(profile)}
+
+
+# ── DELETE /api/profiles/{profile_id} ─────────────────────────────────────────
+@router.delete("/{profile_id}")
+@limiter.limit("20/minute")
+async def delete_profile(
+    request: Request,
+    profile_id: str,
+    x_api_version: Optional[str] = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_admin),
+):
+    _check_api_version(x_api_version)
+
+    from sqlalchemy import delete as sql_delete
+    result = await db.execute(select(Profile).where(Profile.id == profile_id))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    await db.execute(sql_delete(Profile).where(Profile.id == profile_id))
+    await db.commit()
+
+    return {"status": "success", "message": "Profile deleted"}
+

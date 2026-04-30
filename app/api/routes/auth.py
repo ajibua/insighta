@@ -38,18 +38,29 @@ class LogoutRequest(BaseModel):
     refresh_token: str | None = None
 
 
-# ── GET /auth/github — CLI flow (client sends PKCE params) ───────────────────
+# ── GET /auth/github — Unified flow (CLI with params, Web without) ────────────
 @router.get("/github")
 @limiter.limit("10/minute")
 async def github_login(
     request: Request,
-    code_challenge: str = Query(...),
-    state: str = Query(...),
+    code_challenge: str = Query(default=None),
+    state: str = Query(default=None),
     code_verifier: str = Query(default=None),
     cli_callback: str = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
-    # Store state in DB — survives across multiple instances
+    """
+    OAuth login. Two modes:
+    - CLI: client provides code_challenge, state, code_verifier
+    - Web: no params → PKCE generated server-side
+    """
+    # Web flow: generate PKCE server-side if no params provided
+    if not state:
+        state = secrets.token_urlsafe(16)
+    if not code_challenge:
+        code_verifier, code_challenge = generate_pkce_pair()
+
+    # Store state in DB
     oauth_state = OAuthState(
         state=state,
         code_verifier=code_verifier or "",
@@ -62,14 +73,14 @@ async def github_login(
     return RedirectResponse(url)
 
 
-# ── GET /auth/github/web — Web portal flow (PKCE generated server-side) ──────
+# ── GET /auth/github/web — Alias for web portal ──────────────────────────────
 @router.get("/github/web")
 @limiter.limit("10/minute")
 async def github_login_web(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Web portal OAuth — PKCE handled entirely server-side."""
+    """Web portal OAuth — redirects to /auth/github with no params."""
     state = secrets.token_urlsafe(16)
     code_verifier, code_challenge = generate_pkce_pair()
 
@@ -90,10 +101,16 @@ async def github_login_web(
 @limiter.limit("10/minute")
 async def github_callback(
     request: Request,
-    code: str = Query(...),
-    state: str = Query(...),
+    code: str = Query(default=None),
+    state: str = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
+    # Validate required params — return 400, not 422
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing code parameter")
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing state parameter")
+
     # Look up state from DB
     result = await db.execute(select(OAuthState).where(OAuthState.state == state))
     pending = result.scalar_one_or_none()
@@ -220,6 +237,12 @@ async def logout(
     response.delete_cookie("refresh_token")
     response.delete_cookie("csrf_token")
     return response
+
+
+# ── GET /auth/logout — reject with 405 ───────────────────────────────────────
+@router.get("/logout")
+async def logout_get(request: Request):
+    raise HTTPException(status_code=405, detail="Use POST to logout")
 
 
 # ── GET /auth/me ──────────────────────────────────────────────────────────────

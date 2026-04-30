@@ -8,6 +8,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.api.routes.profiles import router as profiles_router
 from app.api.routes.auth import router as auth_router
+from app.api.routes.users import router as users_router
 from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.middleware.logging import RequestLoggingMiddleware
@@ -18,11 +19,16 @@ app = FastAPI(title="Insighta Labs+ API", version="2.0.0")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS — explicit origins required when credentials are used
+# Middleware order: last added = outermost (runs first)
+# 1. Logging (innermost)
+app.add_middleware(RequestLoggingMiddleware)
+
+# 2. CORS (outermost — must intercept OPTIONS preflight first)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         settings.FRONTEND_URL,
+        "https://insightalabs-web-api.vercel.app",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:5500",
@@ -32,9 +38,6 @@ app.add_middleware(
     allow_headers=["*"],
     allow_credentials=True,
 )
-
-# Request logging
-app.add_middleware(RequestLoggingMiddleware)
 
 
 @app.middleware("http")
@@ -101,6 +104,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
 
 app.include_router(auth_router)
 app.include_router(profiles_router)
+app.include_router(users_router)
 
 
 @app.get("/health")
