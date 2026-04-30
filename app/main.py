@@ -23,17 +23,10 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # 1. Logging (innermost)
 app.add_middleware(RequestLoggingMiddleware)
 
-# 2. CORS (outermost — must intercept OPTIONS preflight first)
+# 2. CORS (outermost) — allow_origin_regex reflects any Origin while supporting credentials
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        settings.FRONTEND_URL,
-        "https://insightalabs-web-api.vercel.app",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5500",
-        "http://127.0.0.1:5500",
-    ],
+    allow_origin_regex=r".*",
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True,

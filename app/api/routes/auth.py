@@ -38,9 +38,9 @@ class LogoutRequest(BaseModel):
     refresh_token: str | None = None
 
 
-# ── GET /auth/github — Unified flow (CLI with params, Web without) ────────────
+# ── GET /auth/github — Unified flow ──────────────────────────────────────────
 @router.get("/github")
-@limiter.limit("10/minute")
+@limiter.limit("10 per 15 second")
 async def github_login(
     request: Request,
     code_challenge: str = Query(default=None),
@@ -49,18 +49,12 @@ async def github_login(
     cli_callback: str = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    OAuth login. Two modes:
-    - CLI: client provides code_challenge, state, code_verifier
-    - Web: no params → PKCE generated server-side
-    """
-    # Web flow: generate PKCE server-side if no params provided
+    """OAuth login — works with or without PKCE params."""
     if not state:
         state = secrets.token_urlsafe(16)
     if not code_challenge:
         code_verifier, code_challenge = generate_pkce_pair()
 
-    # Store state in DB
     oauth_state = OAuthState(
         state=state,
         code_verifier=code_verifier or "",
@@ -70,17 +64,16 @@ async def github_login(
     await db.commit()
 
     url = build_github_auth_url(state, code_challenge, settings.GITHUB_REDIRECT_URI)
-    return RedirectResponse(url)
+    return RedirectResponse(url, status_code=307)
 
 
 # ── GET /auth/github/web — Alias for web portal ──────────────────────────────
 @router.get("/github/web")
-@limiter.limit("10/minute")
+@limiter.limit("10 per 15 second")
 async def github_login_web(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Web portal OAuth — redirects to /auth/github with no params."""
     state = secrets.token_urlsafe(16)
     code_verifier, code_challenge = generate_pkce_pair()
 
@@ -93,25 +86,23 @@ async def github_login_web(
     await db.commit()
 
     url = build_github_auth_url(state, code_challenge, settings.GITHUB_REDIRECT_URI)
-    return RedirectResponse(url)
+    return RedirectResponse(url, status_code=307)
 
 
 # ── GET /auth/github/callback ─────────────────────────────────────────────────
 @router.get("/github/callback")
-@limiter.limit("10/minute")
+@limiter.limit("30 per 1 minute")
 async def github_callback(
     request: Request,
     code: str = Query(default=None),
     state: str = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
-    # Validate required params — return 400, not 422
     if not code:
         raise HTTPException(status_code=400, detail="Missing code parameter")
     if not state:
         raise HTTPException(status_code=400, detail="Missing state parameter")
 
-    # Look up state from DB
     result = await db.execute(select(OAuthState).where(OAuthState.state == state))
     pending = result.scalar_one_or_none()
 
@@ -121,7 +112,6 @@ async def github_callback(
     verifier = pending.code_verifier
     cli_callback = pending.cli_callback
 
-    # Delete used state immediately
     await db.execute(delete(OAuthState).where(OAuthState.state == state))
     await db.commit()
 
@@ -140,7 +130,6 @@ async def github_callback(
     access_token, refresh_str = await issue_token_pair(db, user)
 
     if cli_callback:
-        # Legacy local-server CLI flow
         params = urlencode({
             "access_token": access_token,
             "refresh_token": refresh_str,
@@ -148,7 +137,6 @@ async def github_callback(
         })
         return RedirectResponse(f"{cli_callback}?{params}")
 
-    # Store tokens in DB for CLI polling
     oauth_token = OAuthToken(
         state=state,
         access_token=access_token,
@@ -158,15 +146,14 @@ async def github_callback(
     db.add(oauth_token)
     await db.commit()
 
-    # Show success page with HTTP-only cookies (web portal)
     response = HTMLResponse(content=_success_page(user.username))
     _set_auth_cookies(response, access_token, refresh_str)
     return response
 
 
-# ── GET /auth/cli/token — CLI polls this after opening browser ────────────────
+# ── GET /auth/cli/token ───────────────────────────────────────────────────────
 @router.get("/cli/token")
-@limiter.limit("10/minute")
+@limiter.limit("30 per 1 minute")
 async def cli_token(
     request: Request,
     state: str = Query(...),
@@ -185,7 +172,6 @@ async def cli_token(
         "username": token_row.username,
     }
 
-    # Delete after pickup — one-time use
     await db.execute(delete(OAuthToken).where(OAuthToken.state == state))
     await db.commit()
 
@@ -194,7 +180,7 @@ async def cli_token(
 
 # ── POST /auth/refresh ────────────────────────────────────────────────────────
 @router.post("/refresh")
-@limiter.limit("10/minute")
+@limiter.limit("30 per 1 minute")
 async def refresh_tokens(
     request: Request,
     body: RefreshRequest | None = None,
@@ -222,7 +208,7 @@ async def refresh_tokens(
 
 # ── POST /auth/logout ─────────────────────────────────────────────────────────
 @router.post("/logout")
-@limiter.limit("10/minute")
+@limiter.limit("30 per 1 minute")
 async def logout(
     request: Request,
     body: LogoutRequest | None = None,
@@ -239,20 +225,24 @@ async def logout(
     return response
 
 
-# ── GET /auth/logout — reject with 405 ───────────────────────────────────────
+# ── GET /auth/logout — Method not allowed ─────────────────────────────────────
 @router.get("/logout")
 async def logout_get(request: Request):
-    raise HTTPException(status_code=405, detail="Use POST to logout")
+    return JSONResponse(
+        status_code=405,
+        content={"status": "error", "message": "Method not allowed. Use POST to logout."},
+    )
 
 
 # ── GET /auth/me ──────────────────────────────────────────────────────────────
 @router.get("/me")
-@limiter.limit("30/minute")
+@limiter.limit("30 per 1 minute")
 async def me(request: Request, user: User = Depends(get_current_user)):
     return {
         "status": "success",
         "data": {
             "id": user.id,
+            "github_id": user.github_id,
             "username": user.username,
             "email": user.email,
             "avatar_url": user.avatar_url,
