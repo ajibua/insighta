@@ -40,7 +40,7 @@ class LogoutRequest(BaseModel):
 
 # ── GET /auth/github — Unified flow ──────────────────────────────────────────
 @router.get("/github")
-@limiter.limit("10 per 15 second")
+@limiter.limit("10/minute")
 async def github_login(
     request: Request,
     code_challenge: str = Query(default=None),
@@ -64,12 +64,17 @@ async def github_login(
     await db.commit()
 
     url = build_github_auth_url(state, code_challenge, settings.GITHUB_REDIRECT_URI)
-    return RedirectResponse(url, status_code=307)
+    response = RedirectResponse(url, status_code=302)
+    origin = request.headers.get("origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
 
 
 # ── GET /auth/github/web — Alias for web portal ──────────────────────────────
 @router.get("/github/web")
-@limiter.limit("10 per 15 second")
+@limiter.limit("10/minute")
 async def github_login_web(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -86,7 +91,12 @@ async def github_login_web(
     await db.commit()
 
     url = build_github_auth_url(state, code_challenge, settings.GITHUB_REDIRECT_URI)
-    return RedirectResponse(url, status_code=307)
+    response = RedirectResponse(url, status_code=302)
+    origin = request.headers.get("origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
 
 
 # ── GET /auth/github/callback ─────────────────────────────────────────────────
