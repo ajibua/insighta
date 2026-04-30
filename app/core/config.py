@@ -13,6 +13,23 @@ class Settings(BaseSettings):
     PGPASSWORD: str | None = None
     PGDATABASE: str | None = None
 
+    # ── GitHub OAuth ─────────────────────────────────────────────────────
+    GITHUB_CLIENT_ID: str = ""
+    GITHUB_CLIENT_SECRET: str = ""
+    GITHUB_REDIRECT_URI: str = ""
+
+    # ── JWT ───────────────────────────────────────────────────────────────
+    JWT_SECRET: str = "dev-secret-change-me"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
+
+    # ── Frontend / Cookies ───────────────────────────────────────────────
+    FRONTEND_URL: str = "http://localhost:3000"
+    CLI_REDIRECT_URI: str = "http://localhost:9876/callback"
+    COOKIE_SECURE: bool = True
+    COOKIE_SAMESITE: str = "none"
+
     @model_validator(mode="before")
     @classmethod
     def build_database_url_from_pg_vars(cls, data: dict) -> dict:

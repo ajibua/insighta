@@ -9,6 +9,7 @@ import json
 import os
 import ssl
 import sys
+from urllib.parse import urlparse, parse_qs
 
 import asyncpg
 import uuid_utils as uuid
@@ -29,16 +30,27 @@ def classify_age_group(age: int) -> str:
 
 
 def get_connection_kwargs() -> dict:
-    pghost = os.getenv("PGHOST", "localhost")
-    pgpassword = os.getenv("PGPASSWORD")
-    pgport = int(os.getenv("PGPORT", "5432"))
-    pguser = os.getenv("PGUSER", "postgres")
-    pgdatabase = os.getenv("PGDATABASE", "railway")
-    sslmode = os.getenv("PGSSLMODE", "")
+    # Try DATABASE_URL first, then fall back to PG* vars
+    database_url = os.getenv("DATABASE_URL", "")
 
-    # Auto-enable SSL for remote hosts unless explicitly disabled
-    is_remote = pghost not in ("localhost", "127.0.0.1", "::1")
-    use_ssl = sslmode != "disable" and is_remote
+    if database_url:
+        parsed = urlparse(database_url)
+        pghost = parsed.hostname or "localhost"
+        pgport = parsed.port or 5432
+        pguser = parsed.username or "postgres"
+        pgpassword = parsed.password or ""
+        pgdatabase = (parsed.path or "/railway").lstrip("/")
+        query = parse_qs(parsed.query)
+        use_ssl = "sslmode" in query and query["sslmode"][0] != "disable"
+    else:
+        pghost = os.getenv("PGHOST", "localhost")
+        pgpassword = os.getenv("PGPASSWORD", "")
+        pgport = int(os.getenv("PGPORT", "5432"))
+        pguser = os.getenv("PGUSER", "postgres")
+        pgdatabase = os.getenv("PGDATABASE", "railway")
+        sslmode = os.getenv("PGSSLMODE", "")
+        is_remote = pghost not in ("localhost", "127.0.0.1", "::1")
+        use_ssl = sslmode != "disable" and is_remote
 
     ssl_ctx = None
     if use_ssl:

@@ -85,3 +85,25 @@ async def get_profiles(
     profiles = result.scalars().all()
 
     return total, list(profiles)
+
+
+COUNTRY_NAMES = {
+    "NG": "Nigeria", "GH": "Ghana", "KE": "Kenya", "ZA": "South Africa",
+    "ET": "Ethiopia", "TZ": "Tanzania", "EG": "Egypt", "CM": "Cameroon",
+    "CI": "Ivory Coast", "AO": "Angola", "SN": "Senegal", "MZ": "Mozambique",
+    "US": "United States", "GB": "United Kingdom", "FR": "France",
+    "DE": "Germany", "IN": "India", "CN": "China", "BR": "Brazil",
+    "CA": "Canada", "AU": "Australia", "UG": "Uganda", "RW": "Rwanda",
+    "SD": "Sudan", "MA": "Morocco", "DZ": "Algeria", "TN": "Tunisia",
+}
+
+
+def classify_age_group(age: int) -> str:
+    if age < 13:
+        return "child"
+    elif age < 20:
+        return "teenager"
+    elif age < 65:
+        return "adult"
+    else:
+        return "senior"

@@ -18,11 +18,19 @@ class ProfileOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PaginationLinks(BaseModel):
+    self: str
+    next: Optional[str] = None
+    prev: Optional[str] = None
+
+
 class ProfileListResponse(BaseModel):
     status: str = "success"
     page: int
     limit: int
     total: int
+    total_pages: int
+    links: PaginationLinks
     data: List[ProfileOut]
 
 
