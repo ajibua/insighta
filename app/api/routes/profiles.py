@@ -1,31 +1,40 @@
 import asyncio
 import csv
 import io
+import os
+import tempfile
 from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlencode
 
 import httpx
 import uuid_utils as uuid
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.dependencies import get_current_user, require_admin, require_analyst
 from app.core.rate_limit import limiter
 from app.db.database import get_db
 from app.models.profile import Profile
 from app.models.user import User
 from app.schemas.profile import ProfileListResponse, ProfileOut
+from app.services.csv_ingest import ingest_profiles_csv_stream
+from app.services.filter_normalize import build_profiles_cache_key, canonicalize_profile_filters
 from app.services.nl_parser import parse_natural_language
 from app.services.profile_service import (
     VALID_AGE_GROUPS,
     VALID_GENDERS,
     get_profiles,
 )
+from app.services.query_cache import cache_get_json, cache_set_json, invalidate_profiles_cache
 
 router = APIRouter(prefix="/api/profiles", tags=["profiles"])
+
+# Limit concurrent heavy CSV ingests so read traffic keeps pool headroom
+_ingest_semaphore = asyncio.Semaphore(3)
 
 AGIFY_URL = "https://api.agify.io"
 GENDERIZE_URL = "https://api.genderize.io"
@@ -105,6 +114,25 @@ async def list_profiles(
     _validate_filters(gender, age_group, sort_by, order, min_age, max_age,
                       min_gender_probability, min_country_probability, limit)
 
+    raw_filters = {
+        "gender": gender,
+        "age_group": age_group,
+        "country_id": country_id,
+        "min_age": min_age,
+        "max_age": max_age,
+        "min_gender_probability": min_gender_probability,
+        "min_country_probability": min_country_probability,
+        "sort_by": sort_by,
+        "order": order,
+        "page": page,
+        "limit": limit,
+    }
+    canon = canonicalize_profile_filters(raw_filters)
+    cache_key = build_profiles_cache_key("list", canon)
+    cached = await cache_get_json(cache_key)
+    if cached is not None:
+        return ProfileListResponse.model_validate(cached)
+
     total, profiles = await get_profiles(
         db, gender=gender, age_group=age_group, country_id=country_id,
         min_age=min_age, max_age=max_age,
@@ -113,23 +141,18 @@ async def list_profiles(
         sort_by=sort_by, order=order, page=page, limit=limit,
     )
     total_pages = (total + limit - 1) // limit if total > 0 else 1
-    extra = {}
-    if gender: extra["gender"] = gender
-    if age_group: extra["age_group"] = age_group
-    if country_id: extra["country_id"] = country_id
-    if min_age is not None: extra["min_age"] = min_age
-    if max_age is not None: extra["max_age"] = max_age
-    if min_gender_probability is not None: extra["min_gender_probability"] = min_gender_probability
-    if min_country_probability is not None: extra["min_country_probability"] = min_country_probability
-    if sort_by: extra["sort_by"] = sort_by
-    if order != "asc": extra["order"] = order
+
+    
+    extra = {k: v for k, v in canon.items() if k not in ("page", "limit")}
+
     links = _build_pagination_links("/api/profiles", page, limit, total, extra)
 
-    return ProfileListResponse(
+    payload = ProfileListResponse(
         status="success", page=page, limit=limit, total=total,
         total_pages=total_pages, links=links,
         data=[ProfileOut.model_validate(p) for p in profiles],
     )
+    await cache_set_json(cache_key, payload.model_dump(mode="json"), settings.PROFILE_CACHE_TTL_SECONDS)
 
 
 # ── GET /api/profiles/search ──────────────────────────────────────────────────
@@ -152,6 +175,26 @@ async def search_profiles(
     if filters is None:
         raise HTTPException(status_code=400, detail="Unable to interpret query")
 
+    merged = {**filters, "page": page, "limit": limit}
+    canon = canonicalize_profile_filters(merged)
+    cache_key = build_profiles_cache_key("search", canon)
+    cached = await cache_get_json(cache_key)
+    if cached is not None:
+        total = cached["total"]
+        total_pages = cached["total_pages"]
+        links = _build_pagination_links(
+            "/api/profiles/search", page, limit, total, {"q": q},
+        )
+        return {
+            "status": "success",
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": total_pages,
+            "links": links,
+            "data": cached["data"],
+        }
+
     total, profiles = await get_profiles(
         db, gender=filters.get("gender"), age_group=filters.get("age_group"),
         country_id=filters.get("country_id"), min_age=filters.get("min_age"),
@@ -159,6 +202,13 @@ async def search_profiles(
     )
     total_pages = (total + limit - 1) // limit if total > 0 else 1
     links = _build_pagination_links("/api/profiles/search", page, limit, total, {"q": q})
+
+    body = {
+        "total": total,
+        "total_pages": total_pages,
+        "data": [ProfileOut.model_validate(p).model_dump(mode="json") for p in profiles],
+    }
+    await cache_set_json(cache_key, body, settings.PROFILE_CACHE_TTL_SECONDS)
 
     return {
         "status": "success", "page": page, "limit": limit,
@@ -285,8 +335,52 @@ async def create_profile(
         await db.rollback()
         raise HTTPException(status_code=409, detail="Profile with this name already exists")
 
+    await invalidate_profiles_cache()
     return {"status": "success", "data": ProfileOut.model_validate(profile)}
 
+
+@router.post("/import")
+@limiter.limit("10/minute")
+async def import_profiles_csv(
+    request: Request,
+    file: UploadFile = File(...),
+    x_api_version: Optional[str] = Header(default=None),
+    _user: User = Depends(require_admin),   # db: AsyncSession dep removed here
+):
+    """
+    Stream a large CSV via temp file; bulk-insert in chunks.
+    Concurrent imports are bounded by a semaphore so reads keep DB pool headroom.
+    """
+    _check_api_version(x_api_version)
+ 
+    await _ingest_semaphore.acquire()
+    tmp_path: Optional[str] = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(suffix=".csv")
+        os.close(fd)
+        with open(tmp_path, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+ 
+        with open(tmp_path, "rb") as bf:
+            summary = await ingest_profiles_csv_stream(bf)
+ 
+        await invalidate_profiles_cache()
+ 
+        return {
+            "status": "success",
+            "total_rows": summary.total_rows,
+            "inserted": summary.inserted,
+            "skipped": summary.skipped,
+            "reasons": summary.reasons,
+        }
+    finally:
+        _ingest_semaphore.release()
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 # ── DELETE /api/profiles/{profile_id} ─────────────────────────────────────────
 @router.delete("/{profile_id}")
@@ -309,5 +403,5 @@ async def delete_profile(
     await db.execute(sql_delete(Profile).where(Profile.id == profile_id))
     await db.commit()
 
+    await invalidate_profiles_cache()
     return {"status": "success", "message": "Profile deleted"}
-

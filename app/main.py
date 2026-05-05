@@ -19,7 +19,6 @@ app = FastAPI(title="Insighta Labs+ API", version="2.0.0")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Middleware order: last added = outermost (runs first)
 # 1. Logging (innermost)
 app.add_middleware(RequestLoggingMiddleware)
 

@@ -120,6 +120,7 @@ Roles are enforced via FastAPI dependency injection on every endpoint.
 | `GET` | `/api/profiles/search?q=...` | Natural language search | analyst+ |
 | `GET` | `/api/profiles/export?format=csv` | Export as CSV | analyst+ |
 | `POST` | `/api/profiles` | Create via external APIs | admin |
+| `POST` | `/api/profiles/import` | Bulk CSV import (chunked + partial success) | admin |
 
 ### Pagination Shape
 

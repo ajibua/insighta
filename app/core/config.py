@@ -6,6 +6,20 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     DATABASE_URL: str | None = None
+
+    # SQLAlchemy async engine pool (postgresql+asyncpg). Tune per Neon/Railway connection limits.
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 15
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 300
+    # asyncpg TLS handshake / connect timeout (seconds)
+    DB_CONNECT_TIMEOUT: int = 10
+    # Use 0 behind pgBouncer transaction pooling if you see prepared-statement errors; leave unset otherwise
+    DB_ASYNCPG_STATEMENT_CACHE_SIZE: int | None = None
+
+    # Optional: Redis for query caching (falls back to in-process TTL cache if unset)
+    REDIS_URL: str | None = None
+    PROFILE_CACHE_TTL_SECONDS: int = 300
     RAILWAY_ENVIRONMENT: str | None = None
     PGHOST: str | None = None
     PGPORT: int | None = None

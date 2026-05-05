@@ -1,7 +1,8 @@
 import ssl as _ssl
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+
 from app.core.config import settings
 
 
@@ -33,16 +34,22 @@ db_url, requires_ssl = build_async_database_url()
 engine_kwargs = {}
 if not db_url.startswith("sqlite"):
     engine_kwargs = {
-        "pool_size": 5,
-        "max_overflow": 10,
+        "pool_size": settings.DB_POOL_SIZE,
+        "max_overflow": settings.DB_MAX_OVERFLOW,
+        "pool_timeout": settings.DB_POOL_TIMEOUT,
         "pool_pre_ping": True,
-        "pool_recycle": 300,
+        "pool_recycle": settings.DB_POOL_RECYCLE,
     }
+    connect_args = {"timeout": settings.DB_CONNECT_TIMEOUT}
+    if settings.DB_ASYNCPG_STATEMENT_CACHE_SIZE is not None:
+        connect_args["statement_cache_size"] = settings.DB_ASYNCPG_STATEMENT_CACHE_SIZE
+    engine_kwargs["connect_args"] = connect_args
 
 # Handle SSL for Neon / cloud Postgres
 if requires_ssl:
     ssl_ctx = _ssl.create_default_context()
-    engine_kwargs["connect_args"] = {"ssl": ssl_ctx}
+    connect_args = engine_kwargs.setdefault("connect_args", {})
+    connect_args["ssl"] = ssl_ctx
 
 engine = create_async_engine(
     db_url,

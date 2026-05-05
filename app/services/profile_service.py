@@ -56,17 +56,12 @@ async def get_profiles(
     page: int = 1,
     limit: int = 10,
 ) -> Tuple[int, List[Profile]]:
-    # Count query
-    count_stmt = select(func.count()).select_from(Profile)
-    count_stmt = _build_filters(
-        count_stmt, gender, age_group, country_id,
-        min_age, max_age, min_gender_probability, min_country_probability,
-    )
-    total_result = await db.execute(count_stmt)
-    total = total_result.scalar_one()
-
-    # Data query
-    data_stmt = select(Profile)
+    """
+    Single round-trip: filtered rows plus COUNT(*) OVER() for total matches.
+    Avoids a separate COUNT(*) query (remote DB latency × 2).
+    """
+    win_total = func.count().over().label("_win_total")
+    data_stmt = select(Profile, win_total)
     data_stmt = _build_filters(
         data_stmt, gender, age_group, country_id,
         min_age, max_age, min_gender_probability, min_country_probability,
@@ -82,8 +77,12 @@ async def get_profiles(
     data_stmt = data_stmt.offset(offset).limit(limit)
 
     result = await db.execute(data_stmt)
-    profiles = result.scalars().all()
+    rows = result.all()
+    if not rows:
+        return 0, []
 
+    total = int(rows[0]._mapping["_win_total"])
+    profiles = [r[0] for r in rows]
     return total, list(profiles)
 
 

@@ -10,3 +10,4 @@ slowapi
 python-jose[cryptography]
 httpx
 aiosqlite
+redis>=5
