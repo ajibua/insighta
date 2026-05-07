@@ -33,7 +33,7 @@ REQUIRED_HEADERS = {
     "country_probability",
 }
 
-CHUNK_SIZE = 2_500
+CHUNK_SIZE = 250  # 250 rows × 8 cols = 2000 params — safe for Neon/asyncpg
 
 
 def _norm_header(h: str) -> str:
@@ -71,43 +71,46 @@ class IngestSummary:
 
 
 async def ingest_profiles_csv_stream(
-    binary_stream: BinaryIO,              
+    binary_stream: BinaryIO,
     encoding: str = "utf-8",
 ) -> IngestSummary:
-    """
-    Read CSV from a binary stream without loading the whole file into memory.
-    Valid rows are inserted in bulk batches using short-lived sessions per chunk.
-    Duplicate names are handled atomically via ON CONFLICT DO NOTHING —
-    no race window, no batch abort on unique constraint violation.
-    """
     summary = IngestSummary()
-    seen_lower_names: Set[str] = set()   # in-process dedup within this upload
+    seen_lower_names: Set[str] = set()
     pending: List[dict] = []
 
-    # ── flush_batch ──────────────────────────────────────────────────────────
-    # Opens a fresh session per chunk and releases it immediately after commit.
-    # This means the DB connection is held for milliseconds per batch, not for
-    # the entire upload — read queries are never starved of pool connections.
     async def flush_batch(batch: List[dict]) -> None:
-        if not batch:                          
+        """Insert a batch with per-batch session and retry logic."""
+        if not batch:
             return
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with AsyncSessionLocal() as db:
+                    stmt = (
+                        pg_insert(Profile)
+                        .values(batch)
+                        .on_conflict_do_nothing(index_elements=["name"])
+                    )
+                    result = await db.execute(stmt)
+                    await db.commit()
 
-        async with AsyncSessionLocal() as db:  
-            stmt = (
-                pg_insert(Profile)
-                .values(batch)
-                .on_conflict_do_nothing(index_elements=["name"])
-            )
-            result = await db.execute(stmt)
-            await db.commit()
+                    inserted_count = result.rowcount
+                    skipped_count = len(batch) - inserted_count
+                    summary.inserted += inserted_count
+                    if skipped_count > 0:
+                        summary.bump("duplicate_name", skipped_count)
+                    return  # success
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    print(f"  [retry] Batch failed ({e.__class__.__name__}), retrying in {wait}s...")
+                    await asyncio.sleep(wait)
+                else:
+                    print(f"  [error] Batch failed after {max_retries} attempts: {e}")
+                    summary.bump("db_error", len(batch))
 
-        inserted_count = result.rowcount
-        skipped_count = len(batch) - inserted_count
-        summary.inserted += inserted_count
-        if skipped_count > 0:
-            summary.bump("duplicate_name", skipped_count)
-
-    # ── CSV parsing ──────────────────────────────────────────────────────────
+    # ── CSV parsing ──────────────────────────────────────────────────────
     wrapper = TextIOWrapper(binary_stream, encoding=encoding, newline="", errors="replace")
     reader = csv.reader(wrapper)
 
@@ -139,7 +142,7 @@ async def ingest_profiles_csv_stream(
 
     idx_range = range(len(headers))
 
-    # ── Row iteration ────────────────────────────────────────────────────────
+    # ── Row iteration ────────────────────────────────────────────────────
     try:
         for raw in reader:
             summary.total_rows += 1
@@ -226,7 +229,7 @@ async def ingest_profiles_csv_stream(
             if len(pending) >= CHUNK_SIZE:
                 await flush_batch(pending)
                 pending.clear()
-                await asyncio.sleep(0)   # yield to event loop — keeps read queries responsive
+                await asyncio.sleep(0)   # yield to event loop
 
     except UnicodeDecodeError:
         summary.bump("invalid_encoding", 1)

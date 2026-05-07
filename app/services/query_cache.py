@@ -24,13 +24,13 @@ async def _get_redis():
     global _redis
     if _redis is not None:
         return _redis
-    if not settings.REDIS_URL:
+    if not settings.UPSTASH_REDIS_REST_URL:
         return None
     try:
         import redis.asyncio as redis_lib
 
         _redis = redis_lib.from_url(
-            settings.REDIS_URL,
+            settings.UPSTASH_REDIS_REST_URL,
             encoding="utf-8",
             decode_responses=True,
         )

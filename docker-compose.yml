@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: insighta-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: insighta
+      POSTGRES_PASSWORD: insighta_local
+      POSTGRES_DB: insighta
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: insighta-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:

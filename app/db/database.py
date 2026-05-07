@@ -41,8 +41,10 @@ if not db_url.startswith("sqlite"):
         "pool_recycle": settings.DB_POOL_RECYCLE,
     }
     connect_args = {"timeout": settings.DB_CONNECT_TIMEOUT}
-    if settings.DB_ASYNCPG_STATEMENT_CACHE_SIZE is not None:
-        connect_args["statement_cache_size"] = settings.DB_ASYNCPG_STATEMENT_CACHE_SIZE
+    # Disable asyncpg statement cache by default to avoid gkpj errors
+    # with varying INSERT batch sizes. Override via DB_ASYNCPG_STATEMENT_CACHE_SIZE.
+    cache_size = settings.DB_ASYNCPG_STATEMENT_CACHE_SIZE
+    connect_args["statement_cache_size"] = cache_size if cache_size is not None else 0
     engine_kwargs["connect_args"] = connect_args
 
 # Handle SSL for Neon / cloud Postgres

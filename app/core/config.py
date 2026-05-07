@@ -18,14 +18,8 @@ class Settings(BaseSettings):
     DB_ASYNCPG_STATEMENT_CACHE_SIZE: int | None = None
 
     # Optional: Redis for query caching (falls back to in-process TTL cache if unset)
-    REDIS_URL: str | None = None
-    PROFILE_CACHE_TTL_SECONDS: int = 300
-    RAILWAY_ENVIRONMENT: str | None = None
-    PGHOST: str | None = None
-    PGPORT: int | None = None
-    PGUSER: str | None = None
-    PGPASSWORD: str | None = None
-    PGDATABASE: str | None = None
+    UPSTASH_REDIS_REST_URL: str = ""
+    UPSTASH_REDIS_REST_TOKEN: str = ""
 
     # ── GitHub OAuth ─────────────────────────────────────────────────────
     GITHUB_CLIENT_ID: str = ""
@@ -83,18 +77,6 @@ class Settings(BaseSettings):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
         self.DATABASE_URL = url
-        return self
-
-    @model_validator(mode="after")
-    def validate_railway_database_host(self) -> "Settings":
-        if self.RAILWAY_ENVIRONMENT and any(
-            marker in self.DATABASE_URL
-            for marker in ("@localhost", "@127.0.0.1", "@[::1]")
-        ):
-            raise ValueError(
-                "DATABASE_URL points to localhost while running on Railway. "
-                "Set DATABASE_URL to your Railway Postgres connection URL."
-            )
         return self
 
     class Config:
