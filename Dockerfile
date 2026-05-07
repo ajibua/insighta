@@ -8,4 +8,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Run migrations then start the server
-CMD alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8080
+# Use explicit shell form so Fly/Docker always executes both commands.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8080"]
