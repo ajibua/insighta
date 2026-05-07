@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from io import TextIOWrapper
 from typing import BinaryIO, Dict, List, Set
 
+import uuid_utils as uuid
 from sqlalchemy import insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -28,6 +29,7 @@ REQUIRED_HEADERS = {
     "gender_probability",
     "age",
     "country_id",
+    "country_name",
     "country_probability",
 }
 
@@ -206,6 +208,7 @@ async def ingest_profiles_csv_stream(
             cname = cname_raw.strip() or COUNTRY_NAMES.get(cid, cid)
 
             rec = {
+                "id":                  str(uuid.uuid7()),
                 "name":                name_l,
                 "gender":              g,
                 "gender_probability":  gp,

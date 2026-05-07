@@ -153,6 +153,7 @@ async def list_profiles(
         data=[ProfileOut.model_validate(p) for p in profiles],
     )
     await cache_set_json(cache_key, payload.model_dump(mode="json"), settings.PROFILE_CACHE_TTL_SECONDS)
+    return payload
 
 
 # ── GET /api/profiles/search ──────────────────────────────────────────────────
@@ -378,6 +379,7 @@ async def import_profiles_csv(
             "reasons": summary.reasons,
         }
     finally:
+        await file.close()
         _ingest_semaphore.release()
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
