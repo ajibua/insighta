@@ -9,5 +9,6 @@ uuid-utils
 slowapi
 python-jose[cryptography]
 httpx
+python-multipart
 aiosqlite
 redis>=5
