@@ -92,7 +92,7 @@ def _build_pagination_links(base: str, page: int, limit: int, total: int,
 
 # ── GET /api/profiles ─────────────────────────────────────────────────────────
 @router.get("", response_model=ProfileListResponse)
-@limiter.limit("60/minute")
+@limiter.limit("600/minute")
 async def list_profiles(
     request: Request,
     gender: Optional[str] = Query(default=None),

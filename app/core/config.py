@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # Optional: Redis for query caching (falls back to in-process TTL cache if unset)
     UPSTASH_REDIS_REST_URL: str = ""
     UPSTASH_REDIS_REST_TOKEN: str = ""
+    PROFILE_CACHE_TTL_SECONDS: int = 300
 
     # ── GitHub OAuth ─────────────────────────────────────────────────────
     GITHUB_CLIENT_ID: str = ""
@@ -33,7 +34,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
 
     # ── Frontend / Cookies ───────────────────────────────────────────────
-    FRONTEND_URL: str = "http://localhost:3000"
+    FRONTEND_URL: str = "http://127.0.0.1:3000"
     CLI_REDIRECT_URI: str = "http://localhost:9876/callback"
     COOKIE_SECURE: bool = True
     COOKIE_SAMESITE: str = "none"

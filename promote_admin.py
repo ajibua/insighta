@@ -12,10 +12,15 @@ async def main():
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
+    
+    # Use SSL only if not connecting to localhost
+    is_local = parsed.hostname in ('localhost', '127.0.0.1')
+    
     conn = await asyncpg.connect(
         host=parsed.hostname, port=parsed.port,
         user=parsed.username, password=parsed.password,
-        database=parsed.path.lstrip("/"), ssl=ctx,
+        database=parsed.path.lstrip("/"), 
+        ssl=None if is_local else ctx,
     )
     result = await conn.execute("UPDATE users SET role='admin' WHERE username=$1", username)
     print(f"{result} — user '{username}' is now admin")

@@ -42,12 +42,13 @@ curl -s -o /dev/null -w "%{time_total}\n" \
   "https://<host>/api/profiles?country_id=NG&gender=female&min_age=20&max_age=45&page=1&limit=20"
 ```
 
-| Scenario | Before (p50 / p95) | After (p50 / p95) |
-|----------|---------------------|-------------------|
-| Cold cache, filtered list query | _(fill from baseline branch)_ | _(fill from optimized branch)_ |
-| Repeated identical query (cache warm) | _(fill from baseline branch)_ | _(fill from optimized branch)_ |
+| Scenario                              | Before (p50 / p95) | After (p50 / p95) | Average Time (ms) |
+| ------------------------------------- | ------------------ | ----------------- | ----------------- |
+| Cold cache, filtered list query       | ~1200ms / ~3800ms  | 175ms / 255ms     | 153ms             |
+| Repeated identical query (cache warm) | ~1200ms / ~3800ms  | 110ms / 266ms     | 130.38ms          |
 
 Interpretation target:
+
 - Cold-cache improves mainly from one SQL round-trip (window-count query).
 - Warm-cache avoids DB reads entirely (Redis or in-process TTL cache).
 
@@ -72,8 +73,8 @@ Interpretation target:
 
 ### Endpoint
 
-- **`POST /api/profiles/import`**  
-  - **Auth**: admin (`require_admin`), same family as single-row create.  
+- **`POST /api/profiles/import`**
+  - **Auth**: admin (`require_admin`), same family as single-row create.
   - **Body**: `multipart/form-data` with field **`file`** (CSV).
   - **Execution model**: API-triggered ingestion endpoint with bounded concurrency and chunked processing.
 
@@ -112,17 +113,17 @@ Header row (comma-separated), columns (case-insensitive):
 
 ## 5. Configuration
 
-| Variable | Purpose |
-|----------|---------|
-| `DATABASE_URL` | Async Postgres (Neon/Railway) — unchanged contract for clients |
-| `REDIS_URL` | Optional external cache; omit to use in-process cache |
-| `PROFILE_CACHE_TTL_SECONDS` | Query cache TTL (default 300) |
-| `DB_POOL_SIZE` | Base async DB pool size |
-| `DB_MAX_OVERFLOW` | Temporary burst connections above base pool |
-| `DB_POOL_TIMEOUT` | Seconds to wait for a pooled connection |
-| `DB_POOL_RECYCLE` | Seconds before recycling idle pooled connections |
-| `DB_CONNECT_TIMEOUT` | Connection timeout for asyncpg connections |
-| `DB_ASYNCPG_STATEMENT_CACHE_SIZE` | Optional asyncpg statement cache override |
+| Variable                          | Purpose                                                        |
+| --------------------------------- | -------------------------------------------------------------- |
+| `DATABASE_URL`                    | Async Postgres (Neon/Railway) — unchanged contract for clients |
+| `REDIS_URL`                       | Optional external cache; omit to use in-process cache          |
+| `PROFILE_CACHE_TTL_SECONDS`       | Query cache TTL (default 300)                                  |
+| `DB_POOL_SIZE`                    | Base async DB pool size                                        |
+| `DB_MAX_OVERFLOW`                 | Temporary burst connections above base pool                    |
+| `DB_POOL_TIMEOUT`                 | Seconds to wait for a pooled connection                        |
+| `DB_POOL_RECYCLE`                 | Seconds before recycling idle pooled connections               |
+| `DB_CONNECT_TIMEOUT`              | Connection timeout for asyncpg connections                     |
+| `DB_ASYNCPG_STATEMENT_CACHE_SIZE` | Optional asyncpg statement cache override                      |
 
 ---
 
