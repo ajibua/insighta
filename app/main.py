@@ -1,4 +1,7 @@
+import os
+
 from fastapi import FastAPI, Request
+import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -102,3 +105,8 @@ app.include_router(users_router)
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", "8080"))
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=False)
+    
